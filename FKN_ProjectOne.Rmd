@@ -1,0 +1,206 @@
+---
+title: "Internet Usage as a function of Literacy & GDP per Capita"
+author: "Arunima Fatehpuria, Eyram Koblah, & Ben Nguyen"
+output: slidy_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r, include=FALSE}
+#Install necessary packages
+#install.packages("ggplot2")
+#install.packages("dplyr")
+#install.packages("tidyr")
+#install.packages("maps")
+#install.packages("readr")
+#install.packages("leaflet")
+#install.packages("plotly")
+#install.packages('kableExtra')
+#Load necessary packages
+library("ggplot2")
+library("dplyr")
+library("tidyr")
+library("maps")
+library("readr")
+library("leaflet")
+library("plotly")
+library("kableExtra")
+```
+
+```{r code, include=FALSE}
+###Literacy Rate Variable (from Unicef, info from years 2008-2013)
+unicef<-read.csv("unicef.csv")
+#Removing empty rows and columns
+unicef<-unicef[, -c(1, 5, 7, 9:10, 11:18)]
+unicef<-unicef[-c(1:10,208:227),]
+#Renaming columns
+colnames(unicef)<-c("country","year","total","male","female")
+
+###GDP Variable
+gdp<-read.csv("gdp.csv")
+#Delete extranneous/non-informative columns (Footnotes + Where the data was sourced)
+gdp[,c(6:7)]<-NULL
+gdp<-gdp[-c(1),]
+#Rename columns
+colnames(gdp)<-c("code","country", "year","key", "value")
+#Spread all the types of GDP
+gdp2<-spread(gdp, key=key,value=value)
+#Restrict to year 2010 (year/range with most data)
+gdp3<-filter(gdp2, year==2010)
+#Removing other GDP measures (keeping per Capita)/Prep for merging
+gdp3<-gdp3[,-c(1,3,4,5,7)]
+#Rename columns
+colnames(gdp3)[2]<-c("GDPperCap")
+
+###Internet Usage Variable
+internet<-read.csv("internet.csv")
+#Delete extranneous/non-informative columns (Footnotes + Where the data was sourced, Rows w/ region data--we only want by country)
+internet[,c(4,6:7)]<-NULL
+internet2<-internet[-c(2:104), ]
+internet2<-internet2[-c(1),]
+#Rename columns
+colnames(internet2)<-c("code","country", "year", "percent")
+#Restrict to year 2010
+internet3<-filter(internet2, year==2010)
+#Deleting columns/Prep for merging
+internet3<-internet3[,-c(1,3)]
+colnames(internet3)[2]<-c("intuse")
+
+###Making World Map
+world<- map_data("world")
+colnames(world)[5]<-c("country")
+#Centroids (center of ea. country)
+centroid<-read.csv("centroids.csv")
+
+###JOINING
+c1<-full_join(gdp3, internet3, by="country")
+c2<-full_join(c1,unicef, by="country")
+c3<-left_join(world, c2, by="country")
+c4<-left_join(c3, centroid, by="country")
+#Changing Things into correct CLASS
+c4$total<-as.character(c4$total)
+c4$total<-as.numeric(c4$total)
+c4$intuse<-as.character(c4$intuse)
+c4$intuse<-as.numeric(c4$intuse)
+c4$GDPperCap<-as.character(c4$GDPperCap)
+c4$GDPperCap<-parse_number(c4$GDPperCap)
+c4$GDPperCap<-as.numeric(c4$GDPperCap)
+#Omitting Countries without data for ALL THREE variables
+c5<-na.omit(c4)
+#We see we have 62 countries remaining.
+str(unique(c5$country))
+
+###Content for pop-ups/hovers in our Visualizations
+content<-paste('Country:', c5$country,
+               '<br>GDP per Capita (US dollars):', c5$GDPperCap, 
+               '<br>Literacy Rate (percent):', c5$total, 
+               '<br>Internet Usage (percent):', c5$intuse)
+```
+## **Introduction**
+Background:
+
+-  Internet Revolution
+-  Technological Development
+
+
+Our question: We are interested in examining how different rates of technological growth is related to education and economic development globally.
+
+## **Our Project**
+Variables of interest:
+
+-  Countries (*n=62*)
+-  Internet Usage (percentage of individuals in 2010)
+-  GDP per Capita (in 2010)
+-  Literacy Rate (percentage of individuals, collected from 2005 to 2013)
+
+
+Our visualizations:
+
+1. Exploratory
+2. Relational
+3. Investigative
+
+
+
+##**FIRST VISUALIZATION:** *Exploratory*
+World map w/ Markers w/ Popup Text
+
+```{r V1}
+j<-leaflet() %>%
+  addTiles() %>% 
+  addCircleMarkers(data = c5,
+                   lat = ~lat.y, lng = ~long.y,
+                   popup= content,
+                   radius = 5, color = "red", opacity = 0.2)
+j
+###END
+```
+
+##**SECOND VISUALIZATION:** *Relational*
+Colored Scatterplot w/ Hovertext
+
+```{r V2}
+l<-plot_ly(
+  data=c5, x=~c5$total, y=~c5$GDPperCap,
+  type="scatter",
+  mode='markers',
+  marker=list(
+    color=(~c5$intuse),
+    colorscale="Viridis",
+    size=10,
+    colorbar=list(
+      title='Internet Usage')),
+  hoverinfo = 'text',
+  text = ~content)
+l1<-layout(l, title="GDP per Capita by Literacy Rate, colored by Internet Usage",
+           xaxis=list(title="Literacy Rate (Percentage of individuals aged 15 and older)"),
+           yaxis=list(title="GDP per Capita (US dollars)"))
+l1
+###END
+```
+
+##**THIRD VISUALIZATION:** *Investigative*
+Regression of GDP by Internet Usage 
+```{r V3}
+#Source: https://www.listendata.com/2016/07/add-linear-regression-equation-and.html
+#Function for Annotating Regression w/ the Equation + R^2
+linear = function(k) {
+  z <- list(xx = format(coef(k)[1], digits = 2),
+            yy = format(abs(coef(k)[2]), digits = 2),
+            r2 = format(summary(k)$r.squared, digits = 3));
+  if (coef(k)[2] >= 0)  {
+    eq <- substitute(italic(hat(y)) == xx + yy %.% italic(x)*","~~italic(r)^2~"="~r2,z)
+  } else {
+    eq <- substitute(italic(hat(y)) == xx - yy %.% italic(x)*","~~italic(r)^2~"="~r2,z)   
+  }
+  as.character(as.expression(eq));               
+}
+
+#Regression eq.
+g<-c5$intuse~c5$GDPperCap
+
+#Plot w/ Linear Line & Equation
+k<-ggplot(data=c5)+aes(x=GDPperCap, y=intuse)+
+  geom_point(size=4, color="red", alpha=.05)+
+  geom_smooth(method=lm)+
+  labs(title="GDP per Capita by Internet Usage for countries with Literacy Rates 90% and above",
+      x="GDP per Capita", y="Internet Usage")+
+  annotate("text", x = 30000, y = 20,
+           label = linear(lm(g, c5)),
+           colour="black", size = 5, parse=TRUE)
+  
+k
+```
+
+##Conclusion:
+
+Our Conclusions: In our sample, Literacy Rate and Internet Usage are positively related to GDP per Capita, however, Internet Usage varied with GDP per Capita. When examining this relationship further, we found that GDP per Capita significantly predicts Internet Usage (*p < 0.05*).
+
+Limitations:
+
+-  Missing data for some countries
+-  GDP per Capita; Not a great economic indicator
+-  Limited definition of technology use
+-  Old data
